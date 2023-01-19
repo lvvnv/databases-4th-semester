@@ -1,0 +1,83 @@
+1. Найти долю продаж каждого продукта (цена продукта * количество продукта),
+на каждый чек, в денежном выражении.
+WITH TMP(Product, SOID, Price)
+AS (
+	SELECT SOD.ProductID, SOD.SalesOrderID, SUM(SOD.UnitPrice*SOD.OrderQty)
+	FROM [Sales].[SalesOrderDetail] AS SOD
+	JOIN [Sales].[SalesOrderHeader] AS SOH
+	ON SOD.SalesOrderID=SOH.SalesOrderID
+	GROUP BY SOD.ProductID, SOD.SalesOrderID
+	)
+SELECT TMP.Product, TMP.SOID, 
+	TMP.Price/SUM(TMP.Price) OVER(PARTITION BY TMP.SOID) AS 'Part'
+FROM TMP
+ORDER BY TMP.SOID ASC
+
+2. Вывести на экран список продуктов, их стоимость, а также разницу между
+стоимостью этого продукта и стоимостью самого дешевого продукта в той же
+подкатегории, к которой относится продукт.
+WITH TMP(Product, SC, Price)
+AS (
+	SELECT P.Name, P.ProductSubcategoryID, P.ListPrice
+	FROM [Production].[Product] AS P
+	WHERE P.ProductSubcategoryID IS NOT NULL
+	)
+SELECT TMP.Product, TMP.Price,
+	TMP.Price-FIRST_VALUE(TMP.Price) OVER(PARTITION BY TMP.SC ORDER BY TMP.Price ASC) AS 'Difference'
+FROM TMP
+
+3. Вывести три колонки: номер покупателя, номер чека покупателя
+(отсортированный по возрастанию даты чека) и искусственно введенный
+порядковый номер текущего чека, начиная с 1, для каждого покупателя.
+WITH TMP(Customer, SOID, Date)
+AS (
+	SELECT SOH.CustomerID, SOH.SalesOrderID, SOH.OrderDate
+	FROM [Sales].[SalesOrderHeader] AS SOH
+)
+SELECT TMP.Customer, TMP.SOID, 
+	ROW_NUMBER() OVER (PARTITION BY TMP.Customer ORDER BY TMP.Date ASC) AS 'RowNumber'
+FROM TMP
+
+4. Вывести номера продуктов, таких что их цена выше средней цены продукта в
+подкатегории, к которой относится продукт. Запрос реализовать двумя
+способами. В одном из решений допускается использование обобщенного
+табличного выражения.
+WITH TMP(Product, Price, AvgPrice)
+AS (
+	SELECT P.ProductID, P.ListPrice,
+		AVG(P.ListPrice) OVER(PARTITION BY P.ProductSubcategoryID)
+	FROM [Production].[Product] AS P
+	WHERE P.ProductSubcategoryID IS NOT NULL
+)
+SELECT TMP.Product
+FROM TMP
+WHERE TMP.Price>TMP.AvgPrice
+___________________________________
+SELECT P.ProductID
+FROM [Production].[Product] AS P
+WHERE P.ProductSubcategoryID IS NOT NULL
+AND P.ListPrice>(
+	SELECT AVG(P1.ListPrice) 
+	FROM [Production].[Product] AS P1
+	GROUP BY P1.ProductSubcategoryID
+	HAVING P.ProductSubcategoryID=P1.ProductSubcategoryID
+)
+
+5. Вывести на экран номер продукта, название продукта, а также информацию о
+среднем количестве этого продукта, приходящихся на три последних по дате
+чека, в которых был этот продукт.
+WITH TMP(ID, Name, Date, X)
+AS (
+	SELECT P.ProductID, P.Name, SOD.ModifiedDate, 
+		SUM(SOD.OrderQty) OVER (
+		PARTITION BY P.ProductID
+		ORDER BY SOD.ModifiedDate DESC
+		ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)
+	FROM [Production].[Product] AS P
+	JOIN [Sales].[SalesOrderDetail] AS SOD
+	ON P.ProductID=SOD.ProductID
+)
+SELECT DISTINCT TMP.ID, TMP.Name,
+	FIRST_VALUE(TMP.X) OVER (PARTITION BY TMP.ID ORDER BY TMP.Date DESC) / 3 AS AverageCount
+FROM TMP
+ORDER BY TMP.ID
